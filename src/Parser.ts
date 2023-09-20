@@ -2,232 +2,244 @@ import { comment, blockComment, shoppingList as shoppingListRegex, tokens } from
 import { Ingredient, Cookware, Step, Metadata, Item, ShoppingList } from './cooklang';
 
 /**
- * @property defaultCookwareAmount The default value to pass if there is no cookware amount. By default the amount is 1
+ * @property defaultCookwareAmount The default value to pass if there is no cookware amount. By default the amount is 161
  * @property defaultIngredientAmount The default value to pass if there is no ingredient amount. By default the amount is "some"
  * @property includeStepNumber Whether or not to include the step number in ingredient and cookware nodes
- * 
+ *
  */
 export interface ParserOptions {
-    defaultCookwareAmount?: string | number;
-    defaultIngredientAmount?: string | number;
-    includeStepNumber?: boolean;
+	defaultCookwareAmount?: string | number;
+	defaultIngredientAmount?: string | number;
+	includeStepNumber?: boolean;
 }
 
 export interface ParseResult {
-    ingredients: Array<Ingredient>;
-    cookwares: Array<Cookware>;
-    metadata: Metadata;
-    steps: Array<Step>;
-    shoppingList: ShoppingList;
+	ingredients: Array<Ingredient>;
+	cookwares: Array<Cookware>;
+	metadata: Metadata;
+	steps: Array<Step>;
+	shoppingList: ShoppingList;
 }
 
 export default class Parser {
-    defaultCookwareAmount: string | number;
-    defaultIngredientAmount: string | number;
-    includeStepNumber: boolean;
-    defaultUnits = '';
+	defaultCookwareAmount: string | number;
+	defaultIngredientAmount: string | number;
+	includeStepNumber: boolean;
+	defaultUnits = '';
 
-    /**
-     * Creates a new parser with the supplied options
-     * 
-     * @param options The parser's options
-     */
-    constructor(options?: ParserOptions) {
-        this.defaultCookwareAmount = options?.defaultCookwareAmount ?? 1;
-        this.defaultIngredientAmount = options?.defaultIngredientAmount ?? 'some';
-        this.includeStepNumber = options?.includeStepNumber ?? false;
-    }
+	constructor(options?: ParserOptions) {
+		this.defaultCookwareAmount = options?.defaultCookwareAmount ?? 1;
+		this.defaultIngredientAmount = options?.defaultIngredientAmount ?? '';
+		this.includeStepNumber = options?.includeStepNumber ?? false;
+	}
 
-    /**
-     * Parses a Cooklang string and returns any metadata, steps, or shopping lists
-     * 
-     * @param source A Cooklang recipe
-     * @returns The extracted ingredients, cookwares, metadata, steps, and shopping lists
-     * 
-     * @see {@link https://cooklang.org/docs/spec/#the-cook-recipe-specification|Cooklang Recipe}
-     */
-    parse(source: string): ParseResult {
-        const ingredients: Array<Ingredient> = [];
-        const cookwares: Array<Cookware> = [];
-        const metadata: Metadata = {};
-        const steps: Array<Step> = [];
-        const shoppingList: ShoppingList = {};
+	parse(source: string): ParseResult {
+		const ingredients: Array<Ingredient> = [];
+		const cookwares: Array<Cookware> = [];
+		const metadata: Metadata = {};
+		const steps: Array<Step> = [[]];
+		const shoppingList: ShoppingList = {};
+		// console.log(`source`, source)
 
-        // Comments
-        source = source.replace(comment, '').replace(blockComment, ' ');
+		// Comments
+		source = source.replace(comment, '').replace(blockComment, ' ');
 
-        // Parse shopping lists
-        for (let match of source.matchAll(shoppingListRegex)) {
-            const groups = match.groups;
-            if (!groups) continue;
+        // console.log(`source`, source)
 
-            shoppingList[groups.name] = parseShoppingListCategory(
-                groups.items || ''
-            );
+		const paragraphs = source.split(/\r?\n\n\n/).filter((l) => l.trim().length > 0);
+		// console.log(`paragraphs`, paragraphs);
 
-            // Remove it from the source
-            source = source.substring(0, match.index || 0);
-            +source.substring((match.index || 0) + match[0].length);
-        }
+		for (let i = 0; i < paragraphs.length; i++) {
+			const paragraph = paragraphs[i];
 
-        const lines = source.split(/\r?\n/).filter((l) => l.trim().length > 0);
+			let currentStep = i;
+            steps[currentStep] = []
 
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
+			let pos = 0;
 
-            const step: Step = [];
+			// console.log('paragraph', paragraph)
+			// console.log(`paragraph.matchAll(tokens)`, [...paragraph.matchAll(tokens)])
 
-            let pos = 0;
-            for (let match of line.matchAll(tokens)) {
-                const groups = match.groups;
-                if (!groups) continue;
+			for (let match of paragraph.matchAll(tokens)) {
+				const groups = match.groups;
+				// console.log(`groups`, groups)
+				if (!groups) continue;
 
-                // text
-                if (pos < (match.index || 0)) {
-                    step.push({
-                        type: 'text',
-                        value: line.substring(pos, match.index),
-                    });
-                }
+				// linebreak
+				if (groups.lineBreak) {
+					steps[currentStep].push({
+						type: 'text',
+						value: '\n'
+					});
+				}
 
-                // metadata
-                if (groups.key && groups.value) {
-                    metadata[groups.key.trim()] = groups.value.trim();
-                }
+				// text
+				if (pos < (match.index || 0)) {
+					steps[currentStep].push({
+						type: 'text',
+						value: paragraph.substring(pos, match.index)
+					});
+				}
 
-                // single word ingredient
-                if (groups.sIngredientName) {
-                    const ingredient: Ingredient = {
-                        type: 'ingredient',
-                        name: groups.sIngredientName,
-                        quantity: this.defaultIngredientAmount,
-                        units: this.defaultUnits,
-                    };
+				// metadata
+				if (groups.key && groups.value) {
+					metadata[groups.key.trim()] = groups.value.trim();
+				}
 
-                    if (this.includeStepNumber) ingredient.step = i;
+				// single word ingredient
+				if (groups.sIngredientName) {
+					const ingredient: Ingredient = {
+						type: 'ingredient',
+						name: groups.sIngredientName,
+						quantity: this.defaultIngredientAmount,
+						units: this.defaultUnits,
+						group: groups.mIngredientGroup,
+						// group: groups.mIngredientGroup ?? currentStep,
+						step: currentStep,
+					};
 
-                    ingredients.push(ingredient);
-                    step.push(ingredient);
-                }
+					if (this.includeStepNumber) ingredient.step = i;
 
-                // multiword ingredient
-                if (groups.mIngredientName) {
-                    const ingredient: Ingredient = {
-                        type: 'ingredient',
-                        name: groups.mIngredientName,
-                        quantity:
-                            parseQuantity(groups.mIngredientQuantity) ??
-                            this.defaultIngredientAmount,
-                        units: parseUnits(groups.mIngredientUnits) ?? this.defaultUnits,
-                    };
+					ingredients.push(ingredient);
+					steps[currentStep].push(ingredient);
+				}
 
-                    if (this.includeStepNumber) ingredient.step = i;
+				// multiword ingredient
+				if (groups.mIngredientProse) {
+					const measurements = groups.mIngredientMeasurements.split('|')
+					const ingredient: Ingredient = {
+						type: 'ingredient',
+						name: groups.mIngredientName ?? groups.mIngredientProse,
+						prose: groups.mIngredientProse,
+						descriptor: groups.mIngredientDescriptor,
+						quantity: parseQuantity(measurements[0].split('%')[0]) ?? this.defaultIngredientAmount,
+						units: parseUnits(measurements[0].split('%')[1]) ?? this.defaultUnits,
+						measurements,
+						group: groups.mIngredientGroup,
+						// group: groups.mIngredientGroup ?? currentStep,
+						step: currentStep,
+					};
+					// console.log(`ingredient`, ingredient)
 
-                    ingredients.push(ingredient);
-                    step.push(ingredient);
-                }
+					if (this.includeStepNumber) ingredient.step = i;
 
-                // single word cookware
-                if (groups.sCookwareName) {
-                    const cookware: Cookware = {
-                        type: 'cookware',
-                        name: groups.sCookwareName,
-                        quantity: this.defaultCookwareAmount,
-                    };
+					ingredients.push(ingredient);
+					steps[currentStep].push(ingredient);
+				}
 
-                    if (this.includeStepNumber) cookware.step = i;
+				// single word cookware
+				if (groups.sCookwareName) {
+					const cookware: Cookware = {
+						type: 'cookware',
+						name: groups.sCookwareName,
+						quantity: this.defaultCookwareAmount
+					};
 
-                    cookwares.push(cookware);
-                    step.push(cookware);
-                }
+					if (this.includeStepNumber) cookware.step = i;
 
-                // multiword cookware
-                if (groups.mCookwareName) {
-                    const cookware: Cookware = {
-                        type: 'cookware',
-                        name: groups.mCookwareName,
-                        quantity:
-                            parseQuantity(groups.mCookwareQuantity) ??
-                            this.defaultCookwareAmount,
-                    };
+					cookwares.push(cookware);
+					steps[currentStep].push(cookware);
+				}
 
-                    if (this.includeStepNumber) cookware.step = i;
+				// multiword cookware
+				if (groups.mCookwareName) {
+					const cookware: Cookware = {
+						type: 'cookware',
+						name: groups.mCookwareName,
+						quantity: parseQuantity(groups.mCookwareQuantity) ?? this.defaultCookwareAmount
+					};
 
-                    cookwares.push(cookware);
-                    step.push(cookware);
-                }
+					if (this.includeStepNumber) cookware.step = i;
 
-                // timer
-                if (groups.timerQuantity) {
-                    step.push({
-                        type: 'timer',
-                        name: groups.timerName,
-                        quantity: parseQuantity(groups.timerQuantity) ?? 0,
-                        units: parseUnits(groups.timerUnits) ?? this.defaultUnits,
-                    });
-                }
+					cookwares.push(cookware);
+					steps[currentStep].push(cookware);
+				}
 
-                pos = (match.index || 0) + match[0].length;
-            }
+				// timer
+				if (groups.timerQuantity) {
+					steps[currentStep].push({
+						type: 'timer',
+						name: groups.timerName,
+						quantity: parseQuantity(groups.timerQuantity) ?? 0,
+						units: parseUnits(groups.timerUnits) ?? this.defaultUnits
+					});
+				}
+				// title
+				if (groups.title) {
+					steps[currentStep].push({
+						type: 'title',
+						value: groups.title,
+					});
+				}
+				if (groups.highlightProse) {
+					steps[currentStep].push({
+						type: 'highlight',
+						class: groups.highlightClass,
+						value: groups.highlightProse,
+					});
+				}
 
-            // If the entire line hasn't been parsed yet
-            if (pos < line.length) {
-                // Add the rest as a text item
-                step.push({
-                    type: 'text',
-                    value: line.substring(pos),
-                });
-            }
+				pos = (match.index || 0) + match[0].length;
+			}
 
-            if (step.length > 0) steps.push(step);
-        }
+			// If the entire line hasn't been parsed yet
+			if (pos < paragraph.length) {
+				// Add the rest as a text item
+				steps[currentStep].push({
+					type: 'text',
+					value: paragraph.substring(pos)
+				});
+			}
+		}
+        // console.log(`steps`, steps)
 
-        return { ingredients, cookwares, metadata, steps, shoppingList };
-    }
+		return { ingredients, cookwares, metadata, steps, shoppingList };
+	}
 }
 
-function parseQuantity(quantity?: string): string | number | undefined {
-    if (!quantity || quantity.trim() === '') {
-        return undefined;
-    }
+export function parseQuantity(quantity?: string): string | number | undefined {
+	if (!quantity || quantity.trim() === '') {
+		return undefined;
+	}
 
-    quantity = quantity.trim();
+	quantity = quantity.trim();
 
-    const [left, right] = quantity.split('/');
+	const [left, right] = quantity.split('/');
 
-    const [numLeft, numRight] = [Number(left), Number(right)];
+	const [numLeft, numRight] = [Number(left), Number(right)];
 
-    if (right && isNaN(numRight)) return quantity;
+	if (right && isNaN(numRight)) return quantity;
 
-    if (!isNaN(numLeft) && !numRight) return numLeft;
-    else if (!isNaN(numLeft) && !isNaN(numRight) && !(left.startsWith('0') || right.startsWith('0'))) return numLeft / numRight;
+	if (!isNaN(numLeft) && !numRight) return numLeft;
+	else if (!isNaN(numLeft) && !isNaN(numRight) && !(left.startsWith('0') || right.startsWith('0')))
+		return numLeft / numRight;
 
-    return quantity.trim();
+	return quantity.trim();
 }
 
-function parseUnits(units?: string): string | undefined {
-    if (!units || units.trim() === "") {
-        return undefined;
-    }
+export function parseUnits(units?: string): string | undefined {
+	if (!units || units.trim() === '') {
+		return undefined;
+	}
 
-    return units.trim();
+	return units.trim();
 }
 
 function parseShoppingListCategory(items: string): Array<Item> {
-    const list = [];
+	const list = [];
 
-    for (let item of items.split('\n')) {
-        item = item.trim();
+	for (let item of items.split('\n')) {
+		item = item.trim();
 
-        if (item == '') continue;
+		if (item == '') continue;
 
-        const [name, synonym] = item.split('|');
+		const [name, synonym] = item.split('|');
 
-        list.push({
-            name: name.trim(),
-            synonym: synonym?.trim() || '',
-        })
-    }
+		list.push({
+			name: name.trim(),
+			synonym: synonym?.trim() || ''
+		});
+	}
 
-    return list;
+	return list;
 }

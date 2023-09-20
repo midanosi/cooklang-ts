@@ -6,9 +6,13 @@
 export interface Ingredient {
     type: 'ingredient';
     name: string;
+    prose?: string;
+    descriptor?: string;
     quantity: string | number;
     units: string;
     step?: number;
+    measurements?: Array<string>
+    group?: string;
 }
 
 /**
@@ -44,9 +48,27 @@ export interface Text {
 }
 
 /**
+ * A title of a step
+ */
+export interface Title {
+    type: 'title';
+    value: string;
+}
+
+/**
+ * A piece of text to be highlighted in some way
+ */
+export interface Highlight {
+    type: 'highlight';
+    class: string;
+    value: string;
+    concise?: string;
+}
+
+/**
  * A step consisting of multiple ingredients, cookware, timers, and text
  */
-export type Step = Array<Ingredient | Cookware | Timer | Text>;
+export type Step = Array<Ingredient | Cookware | Timer | Text | Title | Highlight>;
 
 /**
  * A recipes metadata
